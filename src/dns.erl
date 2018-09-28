@@ -604,7 +604,7 @@ encode_message_pop_optrr(Other) -> {<<>>, Other}.
 
 %% @doc Returns a random integer suitable for use as DNS message identifier.
 -spec random_id() -> message_id().
-random_id() -> crypto:rand_uniform(0, 65535).
+random_id() -> rand:uniform(65535).
 
 %%%===================================================================
 %%% TSIG functions
@@ -1293,6 +1293,15 @@ decode_optrrdata(?DNS_EOPTCODE_OWNER, <<0:8, S:8, PMAC:6/binary, WMAC:6/binary,
     #dns_opt_owner{seq = S, primary_mac = PMAC, wakeup_mac = WMAC,
 		   password = Password};
 decode_optrrdata(?DNS_EOPTCODE_UL, <<Time:32>>) -> #dns_opt_ul{lease = Time};
+decode_optrrdata(?DNS_EOPTCODE_ECS, <<Family:16, Source_prefix_len:8, Scope_prefix_len:8, 
+                                     Address/binary>>) ->
+    DecodedFamily = case Family of
+                        1 -> inet;
+                        2 -> inet6;
+                        _ -> Family
+                    end,
+    #dns_opt_ecs{family = DecodedFamily, source_prefix_len = Source_prefix_len,
+                 scope_prefix_len = Scope_prefix_len, address = Address};
 decode_optrrdata(EOpt, Bin) -> #dns_opt_unknown{id = EOpt, bin = Bin}.
 
 encode_optrrdata(Opts) when is_list(Opts) ->
@@ -1614,6 +1623,7 @@ eoptcode_name(Int) when is_integer(Int) ->
 	?DNS_EOPTCODE_UL_NUMBER -> ?DNS_EOPTCODE_UL_BSTR;
 	?DNS_EOPTCODE_NSID_NUMBER -> ?DNS_EOPTCODE_NSID_BSTR;
 	?DNS_EOPTCODE_OWNER_NUMBER -> ?DNS_EOPTCODE_OWNER_BSTR;
+        ?DNS_EOPTCODE_ECS_NUMBER -> ?DNS_EOPTCODE_ECS_BSTR;
 	_ -> undefined
     end.
 
