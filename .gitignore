@@ -1,3 +1,5 @@
+rebar3
+.rebar3
 .eunit
 doc
 ebin
@@ -10,4 +12,4 @@ deps
 src/DNS-ASN1.*
 include/DNS-ASN1.hrl
 _build
-
+asngen

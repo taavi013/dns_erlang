@@ -18,7 +18,6 @@
 %%
 %% -------------------------------------------------------------------
 -module(dns).
-
 %% API
 -export([decode_message/1, encode_message/1, encode_message/2]).
 -export([verify_tsig/3, verify_tsig/4]).
@@ -49,7 +48,7 @@
 -type decode_error() :: 'formerr' | 'truncated' | 'trailing_garbage'.
 -type message() :: #dns_message{}.
 -type message_bin() :: <<_:64,_:_*8>>.
--type message_id() :: 0..65535.
+-type message_id() :: 1..65535.
 -type opcode() :: 0..16.
 -type rcode() :: 0..65535.
 -type 'query'() :: #dns_query{}.
@@ -69,6 +68,8 @@
 		| #dns_rrdata_aaaa{}
 		| #dns_rrdata_afsdb{}
 		| #dns_rrdata_caa{}
+		| #dns_rrdata_cdnskey{}
+		| #dns_rrdata_cds{}
 		| #dns_rrdata_cert{}
 		| #dns_rrdata_cname{}
 		| #dns_rrdata_dhcid{}
@@ -801,10 +802,43 @@ decode_rrdata(_Class, ?DNS_TYPE_DNSKEY, <<Flags:16, Protocol:8, AlgNum:8,
 				PublicKey/binary>> = Bin, _MsgBin) ->
     #dns_rrdata_dnskey{flags = Flags, protocol = Protocol, alg = AlgNum,
 		       public_key = PublicKey, key_tag = bin_to_key_tag(Bin)};
+decode_rrdata(_Class, ?DNS_TYPE_CDNSKEY, <<Flags:16, Protocol:8, AlgNum:8,
+				PublicKey/binary>> = Bin, _MsgBin)
+  when AlgNum =:= ?DNS_ALG_RSASHA1 orelse
+       AlgNum =:= ?DNS_ALG_NSEC3RSASHA1 orelse
+       AlgNum =:= ?DNS_ALG_RSASHA256 orelse
+       AlgNum =:= ?DNS_ALG_RSASHA512 ->
+    Key = case PublicKey of
+	      <<0, Len:16, Exp:Len/unit:8, ModBin/binary>> ->
+		  [Exp, binary:decode_unsigned(ModBin)];
+	      <<Len:8, Exp:Len/unit:8, ModBin/binary>> ->
+		  [Exp, binary:decode_unsigned(ModBin)]
+	  end,
+    KeyTag = bin_to_key_tag(Bin),
+    #dns_rrdata_cdnskey{flags = Flags, protocol = Protocol, alg = AlgNum,
+		       public_key = Key, key_tag = KeyTag};
+decode_rrdata(_Class, ?DNS_TYPE_CDNSKEY, <<Flags:16, Protocol:8, AlgNum:8,
+				T, Q:20/unit:8, KeyBin/binary>> = Bin, _MsgBin)
+  when (AlgNum =:= ?DNS_ALG_DSA orelse AlgNum =:= ?DNS_ALG_NSEC3DSA)
+       andalso T =< 8 ->
+    S = 64 + T * 8,
+    <<P:S/unit:8, G:S/unit:8, Y:S/unit:8>> = KeyBin,
+    Key = [P, Q, G, Y],
+    KeyTag = bin_to_key_tag(Bin),
+    #dns_rrdata_cdnskey{flags = Flags, protocol = Protocol, alg = AlgNum,
+		       public_key = Key, key_tag = KeyTag};
+decode_rrdata(_Class, ?DNS_TYPE_CDNSKEY, <<Flags:16, Protocol:8, AlgNum:8,
+				PublicKey/binary>> = Bin, _MsgBin) ->
+    #dns_rrdata_cdnskey{flags = Flags, protocol = Protocol, alg = AlgNum,
+		       public_key = PublicKey, key_tag = bin_to_key_tag(Bin)};
 decode_rrdata(_Class, ?DNS_TYPE_DS, <<KeyTag:16, Alg:8, DigestType:8,
-				      Digest/binary>>, _MsgBin) ->
+              Digest/binary>>, _MsgBin) ->
     #dns_rrdata_ds{keytag = KeyTag, alg = Alg, digest_type = DigestType,
-		   digest = Digest};
+       digest = Digest};
+decode_rrdata(_Class, ?DNS_TYPE_CDS, <<KeyTag:16, Alg:8, DigestType:8,
+              Digest/binary>>, _MsgBin) ->
+    #dns_rrdata_cds{keytag = KeyTag, alg = Alg, digest_type = DigestType,
+       digest = Digest};
 decode_rrdata(_Class, ?DNS_TYPE_HINFO, Bin, _BodyBin) ->
     [CPU, OS] = decode_txt(Bin),
     #dns_rrdata_hinfo{cpu = CPU, os = OS};
@@ -997,7 +1031,49 @@ encode_rrdata(_Pos, _Class, #dns_rrdata_dnskey{flags = Flags,
 					       alg = Alg,
 					       public_key=PK}, CompMap) ->
     {<<Flags:16, Protocol:8, Alg:8, PK/binary>>, CompMap};
+encode_rrdata(_Pos, _Class, #dns_rrdata_cdnskey{flags = Flags,
+					       protocol = Protocol,
+					       alg = Alg,
+					       public_key = [E, M]}, CompMap)
+  when Alg =:= ?DNS_ALG_RSASHA1 orelse
+       Alg =:= ?DNS_ALG_NSEC3RSASHA1 orelse
+       Alg =:= ?DNS_ALG_RSASHA256 orelse
+       Alg =:= ?DNS_ALG_RSASHA512 ->
+    MBin = strip_leading_zeros(binary:encode_unsigned(M)),
+    EBin = strip_leading_zeros(binary:encode_unsigned(E)),
+    ESize = byte_size(EBin),
+    PKBin =  if ESize =< 16#FF ->
+		     <<ESize:8, EBin:ESize/binary, MBin/binary>>;
+		ESize =< 16#FFFF ->
+		     <<0, ESize:16, EBin:ESize/binary, MBin/binary>>;
+		true -> erlang:error(badarg)
+	     end,
+    {<<Flags:16, Protocol:8, Alg:8, PKBin/binary>>, CompMap};
+encode_rrdata(_Pos, _Class, #dns_rrdata_cdnskey{flags = Flags,
+					       protocol = Protocol,
+					       alg = Alg,
+					       public_key = PKM}, CompMap)
+  when Alg =:= ?DNS_ALG_DSA orelse
+       Alg =:= ?DNS_ALG_NSEC3DSA ->
+    [P, Q, G, Y] = [ case X of
+                         <<L:32, I:L/unit:8>> -> I;
+                         X when is_binary(X) -> binary:decode_unsigned(X);
+                         X when is_integer(X) -> X
+                     end || X <- PKM ],
+    M = byte_size(strip_leading_zeros(binary:encode_unsigned(P))),
+    T = (M - 64) div 8,
+    PKBin = <<T, Q:20/unit:8, P:M/unit:8, G:M/unit:8, Y:M/unit:8>>,
+    {<<Flags:16, Protocol:8, Alg:8, PKBin/binary>>, CompMap};
+encode_rrdata(_Pos, _Class, #dns_rrdata_cdnskey{flags = Flags,
+					       protocol = Protocol,
+					       alg = Alg,
+					       public_key=PK}, CompMap) ->
+    {<<Flags:16, Protocol:8, Alg:8, PK/binary>>, CompMap};
 encode_rrdata(_Pos, _Class, #dns_rrdata_ds{keytag = KeyTag, alg = Alg,
+					   digest_type = DigestType,
+					   digest = Digest}, CompMap) ->
+    {<<KeyTag:16, Alg:8, DigestType:8, Digest/binary>>, CompMap};
+encode_rrdata(_Pos, _Class, #dns_rrdata_cds{keytag = KeyTag, alg = Alg,
 					   digest_type = DigestType,
 					   digest = Digest}, CompMap) ->
     {<<KeyTag:16, Alg:8, DigestType:8, Digest/binary>>, CompMap};
@@ -1265,7 +1341,6 @@ pad_bmp(BMP) when is_bitstring(BMP) ->
 
 %%%===================================================================
 %%% EDNS data functions
-%%%===================================================================
 
 decode_optrrdata(<<>>) -> [];
 decode_optrrdata(Bin) -> decode_optrrdata(Bin, []).
@@ -1293,16 +1368,10 @@ decode_optrrdata(?DNS_EOPTCODE_OWNER, <<0:8, S:8, PMAC:6/binary, WMAC:6/binary,
     #dns_opt_owner{seq = S, primary_mac = PMAC, wakeup_mac = WMAC,
 		   password = Password};
 decode_optrrdata(?DNS_EOPTCODE_UL, <<Time:32>>) -> #dns_opt_ul{lease = Time};
-decode_optrrdata(?DNS_EOPTCODE_ECS, <<Family:16, Source_prefix_len:8, Scope_prefix_len:8, 
-                                     Address/binary>>) ->
-    DecodedFamily = case Family of
-                        1 -> inet;
-                        2 -> inet6;
-                        _ -> Family
-                    end,
-    #dns_opt_ecs{family = DecodedFamily, source_prefix_len = Source_prefix_len,
-                 scope_prefix_len = Scope_prefix_len, address = Address};
-decode_optrrdata(EOpt, Bin) -> #dns_opt_unknown{id = EOpt, bin = Bin}.
+decode_optrrdata(?DNS_EOPTCODE_ECS, <<FAMILY:16, SRCPL:8, SCOPEPL:8, Payload/binary>>) ->
+	#dns_opt_ecs{family = FAMILY , source_prefix_length = SRCPL, scope_prefix_length = SCOPEPL, address = Payload};
+decode_optrrdata(EOpt, Bin) -> 
+	#dns_opt_unknown{id = EOpt, bin = Bin}.
 
 encode_optrrdata(Opts) when is_list(Opts) ->
     encode_optrrdata(lists:reverse(Opts), <<>>);
@@ -1327,6 +1396,13 @@ encode_optrrdata(#dns_opt_owner{seq = S, primary_mac = PMAC, wakeup_mac = WMAC,
 encode_optrrdata(#dns_opt_owner{seq = S, primary_mac = PMAC, _ = <<>>})
   when byte_size(PMAC) =:= 6 ->
     {?DNS_EOPTCODE_OWNER, <<0:8, S:8, PMAC/binary>>};
+encode_optrrdata(
+  #dns_opt_ecs{family = FAMILY, 
+			   source_prefix_length = SRCPL,
+			   scope_prefix_length = SCOPEPL, 
+			   address = ADDRESS}) ->
+	Data = <<FAMILY:16, SRCPL:8, SCOPEPL:8, ADDRESS/binary>>,
+	{?DNS_EOPTCODE_ECS, Data};
 encode_optrrdata(#dns_opt_unknown{id = Id, bin = Data})
   when is_integer(Id) andalso is_binary(Data) -> {Id, Data};
 encode_optrrdata(#dns_opt_ecs{family = Family, source_prefix_len = SOPLen, scope_prefix_len = SCPLen, address = Addr}) ->
@@ -1545,12 +1621,14 @@ type_name(Int) when is_integer(Int) ->
 	?DNS_TYPE_OPT_NUMBER -> ?DNS_TYPE_OPT_BSTR;
 	?DNS_TYPE_APL_NUMBER -> ?DNS_TYPE_APL_BSTR;
 	?DNS_TYPE_DS_NUMBER -> ?DNS_TYPE_DS_BSTR;
+	?DNS_TYPE_CDS_NUMBER -> ?DNS_TYPE_CDS_BSTR;
 	?DNS_TYPE_SSHFP_NUMBER -> ?DNS_TYPE_SSHFP_BSTR;
         ?DNS_TYPE_CAA_NUMBER -> ?DNS_TYPE_CAA_BSTR;
 	?DNS_TYPE_IPSECKEY_NUMBER -> ?DNS_TYPE_IPSECKEY_BSTR;
 	?DNS_TYPE_RRSIG_NUMBER -> ?DNS_TYPE_RRSIG_BSTR;
 	?DNS_TYPE_NSEC_NUMBER -> ?DNS_TYPE_NSEC_BSTR;
 	?DNS_TYPE_DNSKEY_NUMBER -> ?DNS_TYPE_DNSKEY_BSTR;
+	?DNS_TYPE_CDNSKEY_NUMBER -> ?DNS_TYPE_CDNSKEY_BSTR;
 	?DNS_TYPE_NSEC3_NUMBER -> ?DNS_TYPE_NSEC3_BSTR;
 	?DNS_TYPE_NSEC3PARAM_NUMBER -> ?DNS_TYPE_NSEC3PARAM_BSTR;
 	?DNS_TYPE_DHCID_NUMBER -> ?DNS_TYPE_DHCID_BSTR;

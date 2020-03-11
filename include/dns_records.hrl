@@ -40,7 +40,9 @@
 -record(dns_rrdata_dlv, {keytag, alg, digest_type, digest}).
 -record(dns_rrdata_dname, {dname}).
 -record(dns_rrdata_dnskey, {flags, protocol, alg, public_key, key_tag}).
+-record(dns_rrdata_cdnskey, {flags, protocol, alg, public_key, key_tag}).
 -record(dns_rrdata_ds, {keytag, alg, digest_type, digest}).
+-record(dns_rrdata_cds, {keytag, alg, digest_type, digest}).
 -record(dns_rrdata_hinfo, {cpu, os}).
 -record(dns_rrdata_ipseckey, {precedence,
 			      alg,
@@ -99,7 +101,12 @@
 -record(dns_opt_nsid, {data}).
 -record(dns_opt_owner, {seq = 0, primary_mac, wakeup_mac, password}).
 -record(dns_opt_ul, {lease}).
--record(dns_opt_ecs, {family, source_prefix_len, scope_prefix_len, address}).
+-record(dns_opt_ecs, {
+		      family,
+		      source_prefix_length, 
+		      scope_prefix_length,
+		      address
+		     }).
 -record(dns_opt_unknown, {id, bin}).
 
 -endif.

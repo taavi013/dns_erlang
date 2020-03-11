@@ -25,7 +25,7 @@
 -export([sign_rr/5, sign_rr/6]).
 -export([sign_rrset/5, sign_rrset/6]).
 -export([verify_rrsig/4]).
--export([add_keytag_to_dnskey/1]).
+-export([add_keytag_to_dnskey/1, add_keytag_to_cdnskey/1]).
 -export([canonical_rrdata_form/1]).
 -export([ih/4]).
 
@@ -168,7 +168,7 @@ gen_nsec3(RRs, ZoneName, Alg, Salt, Iterations, TTL, Class, Opts) ->
 	 non_neg_integer()) -> binary().
 ih(H, Salt, X, 0) when is_function(H, 1) -> H([X, Salt]);
 ih(H, Salt, X, I) when is_function(H, 1) -> ih(H, Salt, H([X, Salt]), I - 1);
-ih(?DNSSEC_NSEC3_ALG_SHA1, Salt, X, I) -> ih(fun crypto:sha/1, Salt, X, I).
+ih(?DNSSEC_NSEC3_ALG_SHA1, Salt, X, I) -> ih(fun (Data) -> crypto:hash(sha, Data) end, Salt, X, I).
 
 add_next_hash([#dns_rr{data = #dns_rrdata_nsec3{hash = First}}|_] = Hashes) ->
     add_next_hash(Hashes, [], First).
@@ -291,7 +291,7 @@ sign_rrset([#dns_rr{name = Name, class = Class, ttl = TTL}|_] = RRs,
     Signature = case Alg of
 		    Alg when Alg =:= ?DNS_ALG_DSA orelse
 			     Alg =:= ?DNS_ALG_NSEC3DSA ->
-			Asn1Sig = crypto:sign(dss, none, BaseSigInput, Key),
+			Asn1Sig = crypto:sign(dss, sha, BaseSigInput, Key),
 			{R, S} = decode_asn1_dss_sig(Asn1Sig),
 			[ P, _Q, _G, _Y ] = Key,
 			T = (byte_size(P) - 64) div 8,
@@ -351,7 +351,7 @@ verify_rrsig(#dns_rr{type = ?DNS_TYPE_RRSIG, data = Data}, RRs, RRDNSKey,
 		      AsnSig = encode_asn1_dss_sig(R, S),
 		      AsnSigSize = byte_size(AsnSig),
 		      AsnBin = <<AsnSigSize:32, AsnSig/binary>>,
-		      crypto:verify(dss, none, SigInput, AsnBin, Key);
+		      crypto:verify(dss, sha, SigInput, AsnBin, Key);
 		 ({_, Alg, Key})
 		    when Alg =:= ?DNS_ALG_NSEC3RSASHA1 orelse
 			 Alg =:= ?DNS_ALG_RSASHA1 orelse
@@ -415,6 +415,13 @@ add_keytag_to_dnskey(#dns_rr{type = ?DNS_TYPE_DNSKEY,
 			     data = #dns_rrdata_dnskey{} = Data} = RR) ->
     KeyBin = dns:encode_rrdata(in, Data),
     NewData = dns:decode_rrdata(?DNS_CLASS_IN, ?DNS_TYPE_DNSKEY, KeyBin),
+    RR#dns_rr{data = NewData}.
+
+-spec add_keytag_to_cdnskey(dns:rr()) -> dns:rr().
+add_keytag_to_cdnskey(#dns_rr{type = ?DNS_TYPE_CDNSKEY,
+			     data = #dns_rrdata_cdnskey{} = Data} = RR) ->
+    KeyBin = dns:encode_rrdata(in, Data),
+    NewData = dns:decode_rrdata(?DNS_CLASS_IN, ?DNS_TYPE_CDNSKEY, KeyBin),
     RR#dns_rr{data = NewData}.
 
 rrsig_to_digestable(#dns_rrdata_rrsig{} = Data) ->
