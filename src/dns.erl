@@ -1405,7 +1405,7 @@ encode_optrrdata(
 	{?DNS_EOPTCODE_ECS, Data};
 encode_optrrdata(#dns_opt_unknown{id = Id, bin = Data})
   when is_integer(Id) andalso is_binary(Data) -> {Id, Data};
-encode_optrrdata(#dns_opt_ecs{family = Family, source_prefix_len = SOPLen, scope_prefix_len = SCPLen, address = Addr}) ->
+encode_optrrdata(#dns_opt_ecs{family = Family, source_prefix_length = SOPLen, scope_prefix_length = SCPLen, address = Addr}) ->
     EncodedFamily = case Family of
 			inet -> 1;
 			inet6 -> 2;
