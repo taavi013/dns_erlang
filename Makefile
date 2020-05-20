@@ -1,5 +1,6 @@
 PROJECT = dns_erlang
 PROJECT_DESCRIPTION = An Erlang DNS message library that supports most common record types, TSIG authenticated messages, EDNS0 and DNSSEC.
+PROJECT_VERSION = 0.1.0
 
 DEPS = base32
 
