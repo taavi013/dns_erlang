@@ -1396,13 +1396,6 @@ encode_optrrdata(#dns_opt_owner{seq = S, primary_mac = PMAC, wakeup_mac = WMAC,
 encode_optrrdata(#dns_opt_owner{seq = S, primary_mac = PMAC, _ = <<>>})
   when byte_size(PMAC) =:= 6 ->
     {?DNS_EOPTCODE_OWNER, <<0:8, S:8, PMAC/binary>>};
-encode_optrrdata(
-  #dns_opt_ecs{family = FAMILY, 
-			   source_prefix_length = SRCPL,
-			   scope_prefix_length = SCOPEPL, 
-			   address = ADDRESS}) ->
-	Data = <<FAMILY:16, SRCPL:8, SCOPEPL:8, ADDRESS/binary>>,
-	{?DNS_EOPTCODE_ECS, Data};
 encode_optrrdata(#dns_opt_unknown{id = Id, bin = Data})
   when is_integer(Id) andalso is_binary(Data) -> {Id, Data};
 encode_optrrdata(#dns_opt_ecs{family = Family, source_prefix_length = SOPLen, scope_prefix_length = SCPLen, address = Addr}) ->
