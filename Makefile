@@ -10,5 +10,3 @@ dep_base32 = hex 0.1.0
 EUNIT_OPTS = verbose
 
 include erlang.mk
-
-include/DNS-ASN1.hrl::	asn1/DNS-ASN1.asn1
