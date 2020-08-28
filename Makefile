@@ -11,8 +11,8 @@ EUNIT_OPTS = verbose
 
 include erlang.mk
 
-include/DNS-ASN1.hrl::	asn1/DNS-ASN1.asn1
-
-src/DNS-ASN1.asn1db::	asn1/DNS-ASN1.asn1
-
-src/DNS-ASN1.erl::	src/DNS-ASN1.asn1db
+#include/DNS-ASN1.hrl::	asn1/DNS-ASN1.asn1
+#
+#src/DNS-ASN1.asn1db::	asn1/DNS-ASN1.asn1
+#
+#src/DNS-ASN1.erl::	asn1/DNS-ASN1.asn1
